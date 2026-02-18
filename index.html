@@ -522,10 +522,15 @@
   let editingUserId      = null;
 
   // Realtime + Polling
-  let pollingInterval     = null;
-  let realtimeSocket      = null;
-  let realtimeRetryTimer  = null;
-  let isRealtimeConnected = false;
+  let pollingInterval      = null;
+  let realtimeSocket       = null;
+  let realtimeRetryTimer   = null;
+  let isRealtimeConnected  = false;
+  let realtimeRetryCount   = 0;
+  const REALTIME_MAX_RETRIES = 3;  // máx 3 intentos; si falla, solo polling
+
+  // /api/auth/users puede devolver 403 con token regular — intentar solo una vez
+  let authUsersAvailable = null; // null=sin probar, false=no disponible
 
   function getAdminToken() { return adminSession?.accessToken || null; }
 
@@ -603,6 +608,8 @@
     teardownRealtime();
     adminSession = null;
     allLoans = []; allProfiles = []; allAuthUsers = [];
+    realtimeRetryCount = 0;
+    authUsersAvailable = null;
     document.getElementById('mainApp').classList.add('hidden');
     document.getElementById('loginScreen').classList.remove('hidden');
     document.getElementById('adminEmail').value = '';
@@ -651,6 +658,7 @@
     realtimeSocket = socket;
 
     socket.onopen = () => {
+      realtimeRetryCount  = 0; // reset en caso de reconexión exitosa
       isRealtimeConnected = true;
       updateRealtimeIndicator();
 
@@ -702,8 +710,12 @@
   }
 
   function scheduleRealtimeRetry() {
-    if (adminSession) {
+    if (adminSession && realtimeRetryCount < REALTIME_MAX_RETRIES) {
+      realtimeRetryCount++;
       realtimeRetryTimer = setTimeout(setupRealtime, 10000);
+    } else {
+      // Agotados los reintentos: WebSocket no disponible, solo polling activo
+      updateRealtimeIndicator(); // muestra indicador amarillo permanente
     }
   }
 
@@ -734,7 +746,13 @@
       dot.style.boxShadow   = '0 0 0 2px rgba(234,179,8,0.3)';
       dot.title             = adminSession ? 'Reconectando...' : 'Desconectado';
       dot.classList.remove('rt-dot-live');
-      if (label) { label.textContent = adminSession ? 'Reconectando...' : 'Polling'; label.style.color = '#8fa8c0'; }
+      if (label) {
+      const txt = !adminSession ? 'Polling'
+                : realtimeRetryCount < REALTIME_MAX_RETRIES ? 'Reconectando...'
+                : 'Solo polling';
+      label.textContent = txt;
+      label.style.color = '#8fa8c0';
+    }
     }
   }
 
@@ -784,14 +802,23 @@
   }
 
   async function loadAuthUsers() {
+    // Si ya sabemos que el endpoint devuelve 403, no hacer más peticiones
+    if (authUsersAvailable === false) return;
     try {
       const res = await fetch(
         `${INSFORGE_URL}/api/auth/users`,
         { headers: { 'Authorization': `Bearer ${getAdminToken()}` } }
       );
+      if (res.status === 403) {
+        // Token regular no tiene acceso; emails vienen del campo 'email' en profiles
+        authUsersAvailable = false;
+        allAuthUsers = [];
+        return;
+      }
       if (!res.ok) { allAuthUsers = []; return; }
       const data = await res.json();
       allAuthUsers = Array.isArray(data) ? data : (data.users || data.data || []);
+      authUsersAvailable = true;
     } catch { allAuthUsers = []; }
   }
 
