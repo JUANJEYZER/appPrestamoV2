@@ -409,6 +409,13 @@
         <label class="text-sm font-medium text-gray-700">Contraseña *</label>
         <input type="text" id="newUserPassword" class="login-input" placeholder="Mínimo 6 caracteres" autocomplete="off" />
       </div>
+      <div>
+        <label class="text-sm font-medium text-gray-700">Rol *</label>
+        <select id="newUserRol" class="login-input" style="padding:14px 18px;">
+          <option value="prestamista">Prestamista</option>
+          <option value="admin">Administrador</option>
+        </select>
+      </div>
     </div>
     <div class="flex gap-3 mt-6">
       <button onclick="closeCreateUserModal()"
@@ -891,6 +898,7 @@
     ['newUserName','newUserEmail','newUserPhone','newUserPassword'].forEach(id => {
       document.getElementById(id).value = '';
     });
+    document.getElementById('newUserRol').value = 'prestamista';
     setTimeout(() => document.getElementById('newUserName').focus(), 100);
   }
 
@@ -903,6 +911,7 @@
     const email    = document.getElementById('newUserEmail').value.trim();
     const phone    = document.getElementById('newUserPhone').value.trim();
     const password = document.getElementById('newUserPassword').value.trim();
+    const rol      = document.getElementById('newUserRol').value;
     const errDiv   = document.getElementById('createUserError');
     const btn      = document.getElementById('createUserBtn');
 
@@ -945,7 +954,7 @@
         user_id:  newUserId,
         nombre:   name,
         telefono: phone || null,
-        rol:      'prestamista',
+        rol,
         activo:   true,
         ...(withExtras ? { email, contrasena_texto: password } : {})
       }];
@@ -971,7 +980,8 @@
       }
 
       closeCreateUserModal();
-      alert(`✅ Prestamista "${name}" creado exitosamente.\n\nCorreo: ${email}\nContraseña: ${password}\n\nComparte estas credenciales para que pueda ingresar a la app.`);
+      const rolLabel = rol === 'admin' ? 'Administrador' : 'Prestamista';
+      alert(`✅ ${rolLabel} "${name}" creado exitosamente.\n\nCorreo: ${email}\nContraseña: ${password}\n\nComparte estas credenciales para que pueda ingresar.`);
       await loadAllData();
 
     } catch (e) {
