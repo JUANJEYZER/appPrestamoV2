@@ -92,6 +92,13 @@
     .text-red-500   { color: #f87171 !important; }
     .text-purple-600{ color: #c084fc !important; }
     .text-gray-400 .material-symbols-outlined { color: #7a9ab8; }
+
+    /* ═══ REALTIME INDICATOR ═══ */
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; box-shadow: 0 0 0 2px rgba(34,197,94,0.3); }
+      50%       { opacity: 0.6; box-shadow: 0 0 0 4px rgba(34,197,94,0.1); }
+    }
+    .rt-dot-live    { animation: pulse-dot 2s ease-in-out infinite; }
   </style>
 </head>
 <body class="min-h-screen">
@@ -138,10 +145,17 @@
           <p class="text-xs text-gray-500" id="adminNameDisplay">Administrador</p>
         </div>
       </div>
-      <button onclick="adminLogout()" class="flex items-center gap-1 text-sm text-gray-500 hover:text-red-600 transition-colors">
-        <span class="material-symbols-outlined" style="font-size:20px;">logout</span>
-        <span class="hidden sm:inline">Salir</span>
-      </button>
+      <div class="flex items-center gap-3">
+        <!-- Indicador de conexión en tiempo real -->
+        <div id="realtimeIndicator" class="hidden items-center gap-1.5 text-xs">
+          <span id="realtimeDot" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#eab308;box-shadow:0 0 0 2px rgba(234,179,8,0.3);transition:background .4s,box-shadow .4s;" title="Conectando..."></span>
+          <span id="realtimeLabel" class="hidden sm:inline" style="color:#8fa8c0;">Conectando...</span>
+        </div>
+        <button onclick="adminLogout()" class="flex items-center gap-1 text-sm text-gray-500 hover:text-red-600 transition-colors">
+          <span class="material-symbols-outlined" style="font-size:20px;">logout</span>
+          <span class="hidden sm:inline">Salir</span>
+        </button>
+      </div>
     </div>
   </header>
 
@@ -507,6 +521,12 @@
   let allDeletedHistory  = [];
   let editingUserId      = null;
 
+  // Realtime + Polling
+  let pollingInterval     = null;
+  let realtimeSocket      = null;
+  let realtimeRetryTimer  = null;
+  let isRealtimeConnected = false;
+
   function getAdminToken() { return adminSession?.accessToken || null; }
 
   // ============================================================
@@ -561,6 +581,14 @@
 
       await loadAllData();
 
+      // Iniciar polling + realtime
+      startPolling();
+      setupRealtime();
+
+      // Mostrar indicador de conexión
+      const ind = document.getElementById('realtimeIndicator');
+      if (ind) ind.style.display = 'flex';
+
     } catch (e) {
       errDiv.textContent = e.message || 'Error de autenticación.';
       errDiv.style.display = 'block';
@@ -571,12 +599,143 @@
   }
 
   function adminLogout() {
+    stopPolling();
+    teardownRealtime();
     adminSession = null;
     allLoans = []; allProfiles = []; allAuthUsers = [];
     document.getElementById('mainApp').classList.add('hidden');
     document.getElementById('loginScreen').classList.remove('hidden');
     document.getElementById('adminEmail').value = '';
     document.getElementById('adminPassword').value = '';
+    // Ocultar indicador
+    const ind = document.getElementById('realtimeIndicator');
+    if (ind) ind.style.display = 'none';
+  }
+
+  // ============================================================
+  // POLLING AUTOMÁTICO (fallback cada 30s)
+  // ============================================================
+  function startPolling() {
+    stopPolling();
+    pollingInterval = setInterval(async () => {
+      if (adminSession) await loadAllData();
+    }, 30000);
+  }
+
+  function stopPolling() {
+    if (pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; }
+  }
+
+  // ============================================================
+  // REALTIME VÍA WEBSOCKET (InsForge / Supabase protocol)
+  // ============================================================
+  function setupRealtime() {
+    // Limpiar intento anterior
+    if (realtimeRetryTimer) { clearTimeout(realtimeRetryTimer); realtimeRetryTimer = null; }
+    if (realtimeSocket) {
+      realtimeSocket.onclose = null;
+      if (realtimeSocket._heartbeat) clearInterval(realtimeSocket._heartbeat);
+      realtimeSocket.close();
+      realtimeSocket = null;
+    }
+
+    const wsBase = INSFORGE_URL.replace('https://', 'wss://').replace('http://', 'ws://');
+    const wsUrl  = `${wsBase}/realtime/v1/websocket?apikey=${INSFORGE_API_KEY}&vsn=1.0.0`;
+
+    let socket;
+    try { socket = new WebSocket(wsUrl); }
+    catch (e) {
+      scheduleRealtimeRetry();
+      return;
+    }
+    realtimeSocket = socket;
+
+    socket.onopen = () => {
+      isRealtimeConnected = true;
+      updateRealtimeIndicator();
+
+      // Suscribirse a cambios en prestamos
+      socket.send(JSON.stringify({
+        topic:   'realtime:public:prestamos',
+        event:   'phx_join',
+        payload: { config: { broadcast: { self: false }, presence: { key: '' } } },
+        ref:     '1'
+      }));
+      // Suscribirse a cambios en profiles
+      socket.send(JSON.stringify({
+        topic:   'realtime:public:profiles',
+        event:   'phx_join',
+        payload: { config: { broadcast: { self: false }, presence: { key: '' } } },
+        ref:     '2'
+      }));
+
+      // Heartbeat cada 25s para mantener la conexión viva
+      socket._heartbeat = setInterval(() => {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: null }));
+        }
+      }, 25000);
+    };
+
+    socket.onmessage = async (evt) => {
+      try {
+        const msg = JSON.parse(evt.data);
+        // Eventos de cambio de datos
+        const evType = msg.event || (msg.payload && msg.payload.type) || '';
+        if (evType === 'INSERT' || evType === 'UPDATE' || evType === 'DELETE') {
+          await loadAllData();
+        }
+      } catch (_) {}
+    };
+
+    socket.onerror = () => {
+      isRealtimeConnected = false;
+      updateRealtimeIndicator();
+    };
+
+    socket.onclose = () => {
+      isRealtimeConnected = false;
+      updateRealtimeIndicator();
+      if (socket._heartbeat) clearInterval(socket._heartbeat);
+      scheduleRealtimeRetry();
+    };
+  }
+
+  function scheduleRealtimeRetry() {
+    if (adminSession) {
+      realtimeRetryTimer = setTimeout(setupRealtime, 10000);
+    }
+  }
+
+  function teardownRealtime() {
+    if (realtimeRetryTimer) { clearTimeout(realtimeRetryTimer); realtimeRetryTimer = null; }
+    if (realtimeSocket) {
+      if (realtimeSocket._heartbeat) clearInterval(realtimeSocket._heartbeat);
+      realtimeSocket.onclose = null;
+      realtimeSocket.close();
+      realtimeSocket = null;
+    }
+    isRealtimeConnected = false;
+    updateRealtimeIndicator();
+  }
+
+  function updateRealtimeIndicator() {
+    const dot   = document.getElementById('realtimeDot');
+    const label = document.getElementById('realtimeLabel');
+    if (!dot) return;
+    if (isRealtimeConnected) {
+      dot.style.background  = '#22c55e';
+      dot.style.boxShadow   = '0 0 0 2px rgba(34,197,94,0.3)';
+      dot.title             = 'Tiempo real activo';
+      dot.classList.add('rt-dot-live');
+      if (label) { label.textContent = 'En vivo'; label.style.color = '#4ade80'; }
+    } else {
+      dot.style.background  = '#eab308';
+      dot.style.boxShadow   = '0 0 0 2px rgba(234,179,8,0.3)';
+      dot.title             = adminSession ? 'Reconectando...' : 'Desconectado';
+      dot.classList.remove('rt-dot-live');
+      if (label) { label.textContent = adminSession ? 'Reconectando...' : 'Polling'; label.style.color = '#8fa8c0'; }
+    }
   }
 
   document.addEventListener('DOMContentLoaded', () => {
