@@ -233,6 +233,8 @@
       <!-- Filtros -->
       <div class="flex flex-wrap gap-3 items-end mb-5">
         <h2 class="text-xl font-bold text-gray-900 mr-auto">Todos los Préstamos</h2>
+        <input type="text" id="filterCliente" oninput="filterLoans()" placeholder="🔍 Buscar cliente..."
+               style="border:1.5px solid #475569;border-radius:10px;padding:8px 12px;font-size:14px;background:#0f172a;color:#e2e8f0;outline:none;min-width:180px;" />
         <select id="filterPrestamista" onchange="filterLoans()" class="text-sm">
           <option value="">Todos los prestamistas</option>
         </select>
@@ -1011,6 +1013,7 @@
     const eFilter = document.getElementById('filterEstado').value;
     const dDesde  = document.getElementById('filterDesde').value;
     const dHasta  = document.getElementById('filterHasta').value;
+    const cFilter = (document.getElementById('filterCliente').value || '').toLowerCase().trim();
 
     const profMap = Object.fromEntries(allProfiles.map(p => [p.user_id, p.nombre]));
 
@@ -1019,6 +1022,7 @@
       if (eFilter && l.estado !== eFilter)          return false;
       if (dDesde  && (l.fecha_prestamo || '') < dDesde) return false;
       if (dHasta  && (l.fecha_prestamo || '') > dHasta) return false;
+      if (cFilter && !(l.cliente_nombre || '').toLowerCase().includes(cFilter)) return false;
       return true;
     });
 
@@ -1050,7 +1054,7 @@
         ? '<span class="badge" style="background:#ede9fe;color:#5b21b6;">% Inc</span>'
         : '<span class="badge" style="background:#dbeafe;color:#1d4ed8;">Periódico</span>';
       return `
-        <tr>
+        <tr onclick="openLoanDetail('${l.id}')" style="cursor:pointer;" title="Ver detalle del préstamo">
           <td class="font-medium text-gray-900">${clientName}</td>
           <td class="text-gray-600">${prestamista}</td>
           <td style="text-align:right" class="font-semibold">$${Number(l.monto_principal||0).toLocaleString()}</td>
@@ -1362,6 +1366,214 @@
       .replace(/>/g,'&gt;')
       .replace(/"/g,'&quot;');
   }
+
+  // ============================================================
+  // DETALLE DE PRÉSTAMO
+  // ============================================================
+  function openLoanDetail(loanId) {
+    const l = allLoans.find(x => String(x.id) === String(loanId));
+    if (!l) return;
+
+    const profMap       = Object.fromEntries(allProfiles.map(p => [p.user_id, p.nombre]));
+    const prestamista   = profMap[l.prestamista_id] || '—';
+    const clientName    = (l.cliente_nombre || '').replace(' %incluido', '');
+    const pagos         = Array.isArray(l.pagos)
+      ? [...l.pagos].sort((a, b) => (b.timestamp || b.date || 0) - (a.timestamp || a.date || 0))
+      : [];
+
+    const isInc         = (l.cliente_nombre || '').includes('%incluido') || l.tipo_interes === 'agregado';
+    const frecLabel     = { diario:'Diario', semanal:'Semanal', quincenal:'Quincenal', mensual:'Mensual' }[l.frecuencia] || l.frecuencia || '—';
+    const tipoLabel     = isInc ? '% Incluido' : 'Periódico';
+    const estadoBadge   = l.estado === 'active'
+      ? '<span class="badge badge-active">Activo</span>'
+      : '<span class="badge badge-completed">Completado</span>';
+
+    // Totales calculados de los pagos
+    const pagosReales   = pagos.filter(p => p.type !== 'refinanciamiento' && Number(p.amount) > 0);
+    const totalPagado   = pagosReales.reduce((s, p) => s + Number(p.amount || 0), 0);
+    const totalCapPag   = pagos.filter(p => p.type === 'capital').reduce((s, p) => s + Number(p.amount || 0), 0);
+    const totalIntPag   = pagos.filter(p => p.type === 'interest').reduce((s, p) => s + Number(p.amount || 0), 0);
+
+    // Cabecera del modal
+    document.getElementById('ldClientName').textContent    = clientName || '—';
+    document.getElementById('ldPrestamista').textContent   = prestamista;
+    document.getElementById('ldEstado').innerHTML          = estadoBadge;
+
+    // Datos del cliente
+    document.getElementById('ldCedula').textContent    = l.cliente_cedula    || '—';
+    document.getElementById('ldTelefono').textContent  = l.cliente_telefono  || '—';
+    document.getElementById('ldDireccion').textContent = l.cliente_direccion || '—';
+
+    // Datos del préstamo
+    document.getElementById('ldCapital').textContent   = '$' + Number(l.monto_principal || 0).toLocaleString();
+    document.getElementById('ldTasa').textContent      = Number(l.tasa_interes || 0) + '%';
+    document.getElementById('ldTipo').textContent      = tipoLabel;
+    document.getElementById('ldFrecuencia').textContent= frecLabel;
+    document.getElementById('ldPlazo').textContent     = (l.plazo || '—') + (l.plazo ? ' cuotas' : '');
+    document.getElementById('ldFecha').textContent     = l.fecha_prestamo || '—';
+    document.getElementById('ldObservaciones').textContent = l.observaciones || '—';
+
+    // Resumen de pagos
+    document.getElementById('ldTotalPagado').textContent  = '$' + totalPagado.toLocaleString();
+    document.getElementById('ldCapPagado').textContent    = '$' + totalCapPag.toLocaleString();
+    document.getElementById('ldIntPagado').textContent    = '$' + totalIntPag.toLocaleString();
+    document.getElementById('ldSaldoActual').textContent  = '$' + Number(l.saldo_actual || 0).toLocaleString();
+
+    // Historial de pagos
+    const tbody = document.getElementById('ldPagosBody');
+    if (pagos.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="4" class="text-center text-gray-400 py-6">Sin pagos registrados</td></tr>`;
+    } else {
+      tbody.innerHTML = pagos.map(p => {
+        const ts      = p.timestamp || p.date || 0;
+        const fecha   = ts ? new Date(ts).toLocaleDateString('es-ES', { day:'2-digit', month:'short', year:'numeric' }) : '—';
+        const hora    = ts ? new Date(ts).toLocaleTimeString('es-ES', { hour:'2-digit', minute:'2-digit' }) : '';
+        const isZero  = Number(p.amount) === 0;
+        const isRefin = p.type === 'refinanciamiento';
+        const tipo    = p.type === 'capital' ? 'Capital'
+                      : p.type === 'interest' ? 'Interés'
+                      : p.type === 'refinanciamiento' ? 'Refinanc.'
+                      : p.type || '—';
+        const tipoCls = p.type === 'capital'   ? 'background:rgba(59,130,246,0.2);color:#93c5fd;'
+                      : p.type === 'interest'  ? 'background:rgba(34,197,94,0.2);color:#86efac;'
+                      : 'background:rgba(168,85,247,0.2);color:#d8b4fe;';
+        const montoStr = isZero ? '<span style="color:#f87171;">Sin pago</span>'
+                       : `<span style="color:${isRefin ? '#d8b4fe' : '#f1f5f9'};font-weight:600;">${isRefin ? '+' : ''}$${Math.abs(Number(p.amount)).toLocaleString()}</span>`;
+        return `
+          <tr>
+            <td style="font-size:13px;">${fecha}<br><span style="color:#475569;font-size:11px;">${hora}</span></td>
+            <td><span class="badge" style="${tipoCls}font-size:11px;">${tipo}</span></td>
+            <td style="text-align:right;">${montoStr}</td>
+            <td style="font-size:12px;color:#64748b;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(p.notes || '—')}</td>
+          </tr>`;
+      }).join('');
+    }
+
+    document.getElementById('loanDetailModal').classList.remove('hidden');
+  }
+
+  function closeLoanDetail() {
+    document.getElementById('loanDetailModal').classList.add('hidden');
+  }
 </script>
+
+<!-- ============================================================ -->
+<!-- MODAL: DETALLE DE PRÉSTAMO                                   -->
+<!-- ============================================================ -->
+<div id="loanDetailModal" class="modal-overlay hidden" onclick="if(event.target===this)closeLoanDetail()">
+  <div class="modal-card" style="max-width:600px;">
+
+    <!-- Cabecera -->
+    <div class="flex items-start justify-between mb-5">
+      <div>
+        <h3 class="text-xl font-bold text-gray-900" id="ldClientName">—</h3>
+        <p class="text-sm text-gray-500 mt-0.5">Prestamista: <span id="ldPrestamista" class="font-medium text-gray-700"></span></p>
+      </div>
+      <div class="flex items-center gap-3">
+        <span id="ldEstado"></span>
+        <button onclick="closeLoanDetail()" class="text-gray-400 hover:text-gray-600">
+          <span class="material-symbols-outlined" style="font-size:24px;">close</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Datos del cliente -->
+    <div style="background:#0f172a;border-radius:12px;padding:16px;margin-bottom:16px;">
+      <p class="text-xs text-gray-500 uppercase font-semibold tracking-wide mb-3">Datos del Cliente</p>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <p class="text-xs text-gray-500">Cédula / ID</p>
+          <p class="text-sm font-medium text-gray-200 mt-0.5" id="ldCedula">—</p>
+        </div>
+        <div>
+          <p class="text-xs text-gray-500">Teléfono</p>
+          <p class="text-sm font-medium text-gray-200 mt-0.5" id="ldTelefono">—</p>
+        </div>
+        <div class="col-span-2">
+          <p class="text-xs text-gray-500">Dirección</p>
+          <p class="text-sm font-medium text-gray-200 mt-0.5" id="ldDireccion">—</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Datos del préstamo -->
+    <div style="background:#0f172a;border-radius:12px;padding:16px;margin-bottom:16px;">
+      <p class="text-xs text-gray-500 uppercase font-semibold tracking-wide mb-3">Condiciones del Préstamo</p>
+      <div class="grid grid-cols-3 gap-3">
+        <div>
+          <p class="text-xs text-gray-500">Capital Inicial</p>
+          <p class="text-lg font-bold text-blue-400 mt-0.5" id="ldCapital">—</p>
+        </div>
+        <div>
+          <p class="text-xs text-gray-500">Tasa</p>
+          <p class="text-lg font-bold text-gray-200 mt-0.5" id="ldTasa">—</p>
+        </div>
+        <div>
+          <p class="text-xs text-gray-500">Tipo</p>
+          <p class="text-sm font-medium text-gray-300 mt-0.5" id="ldTipo">—</p>
+        </div>
+        <div>
+          <p class="text-xs text-gray-500">Frecuencia</p>
+          <p class="text-sm font-medium text-gray-300 mt-0.5" id="ldFrecuencia">—</p>
+        </div>
+        <div>
+          <p class="text-xs text-gray-500">Plazo</p>
+          <p class="text-sm font-medium text-gray-300 mt-0.5" id="ldPlazo">—</p>
+        </div>
+        <div>
+          <p class="text-xs text-gray-500">Fecha</p>
+          <p class="text-sm font-medium text-gray-300 mt-0.5" id="ldFecha">—</p>
+        </div>
+        <div class="col-span-3">
+          <p class="text-xs text-gray-500">Observaciones</p>
+          <p class="text-sm text-gray-400 mt-0.5" id="ldObservaciones">—</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Resumen de pagos -->
+    <div class="grid grid-cols-4 gap-3 mb-4">
+      <div class="card p-3 text-center">
+        <p class="text-xs text-gray-500">Total Cobrado</p>
+        <p class="font-bold text-green-400 mt-1" id="ldTotalPagado">—</p>
+      </div>
+      <div class="card p-3 text-center">
+        <p class="text-xs text-gray-500">Capital Pag.</p>
+        <p class="font-bold text-blue-400 mt-1" id="ldCapPagado">—</p>
+      </div>
+      <div class="card p-3 text-center">
+        <p class="text-xs text-gray-500">Interés Pag.</p>
+        <p class="font-bold text-purple-400 mt-1" id="ldIntPagado">—</p>
+      </div>
+      <div class="card p-3 text-center">
+        <p class="text-xs text-gray-500">Saldo</p>
+        <p class="font-bold text-red-400 mt-1" id="ldSaldoActual">—</p>
+      </div>
+    </div>
+
+    <!-- Historial de pagos -->
+    <p class="text-xs text-gray-500 uppercase font-semibold tracking-wide mb-2">Historial de Pagos</p>
+    <div style="border-radius:12px;overflow:hidden;border:1px solid #334155;">
+      <div style="overflow-x:auto;max-height:280px;overflow-y:auto;">
+        <table class="w-full">
+          <thead style="position:sticky;top:0;z-index:1;">
+            <tr>
+              <th>Fecha</th>
+              <th>Tipo</th>
+              <th style="text-align:right;">Monto</th>
+              <th>Notas</th>
+            </tr>
+          </thead>
+          <tbody id="ldPagosBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <button onclick="closeLoanDetail()"
+            class="w-full mt-5 border border-gray-200 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-50 transition-colors">
+      Cerrar
+    </button>
+  </div>
+</div>
 </body>
 </html>
