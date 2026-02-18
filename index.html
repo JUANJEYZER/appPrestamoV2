@@ -1391,8 +1391,8 @@
     // Totales calculados de los pagos
     const pagosReales   = pagos.filter(p => p.type !== 'refinanciamiento' && Number(p.amount) > 0);
     const totalPagado   = pagosReales.reduce((s, p) => s + Number(p.amount || 0), 0);
-    const totalCapPag   = pagos.filter(p => p.type === 'capital').reduce((s, p) => s + Number(p.amount || 0), 0);
-    const totalIntPag   = pagos.filter(p => p.type === 'interest').reduce((s, p) => s + Number(p.amount || 0), 0);
+    const totalCapPag   = pagos.filter(p => p.type === 'capital'  && Number(p.amount) > 0).reduce((s, p) => s + Number(p.amount || 0), 0);
+    const totalIntPag   = pagos.filter(p => p.type !== 'capital' && p.type !== 'refinanciamiento' && Number(p.amount) > 0).reduce((s, p) => s + Number(p.amount || 0), 0);
 
     // Cabecera del modal
     document.getElementById('ldClientName').textContent    = clientName || '—';
