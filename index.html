@@ -1681,12 +1681,12 @@
     // Eliminar todos los préstamos del cliente
     for (const loan of clientLoans) {
       try {
-        const res = await fetch(`${INSFORGE_URL}/api/database/records/prestamos/${loan.id}`, {
+        const res = await fetch(`${INSFORGE_URL}/api/database/records/prestamos?id=eq.${loan.id}`, {
           method: 'DELETE',
           headers: { 'Authorization': `Bearer ${getAdminToken()}` }
         });
         if (await checkExpiry(res)) return;
-        if (!res.ok && res.status !== 404) errors++;
+        if (!res.ok) errors++;
       } catch { errors++; }
     }
 
@@ -1695,11 +1695,11 @@
     for (const h of histToDelete) {
       if (!h.id) continue;
       try {
-        const res = await fetch(`${INSFORGE_URL}/api/database/records/historial_eliminados/${h.id}`, {
+        const res = await fetch(`${INSFORGE_URL}/api/database/records/historial_eliminados?id=eq.${h.id}`, {
           method: 'DELETE',
           headers: { 'Authorization': `Bearer ${getAdminToken()}` }
         });
-        if (!res.ok && res.status !== 404) errors++;
+        if (!res.ok) errors++;
       } catch {}
     }
 
