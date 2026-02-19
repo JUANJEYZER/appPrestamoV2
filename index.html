@@ -629,6 +629,77 @@
   }
 
   // ============================================================
+  // MANEJO DE EXPIRACIÓN DE SESIÓN
+  // ============================================================
+  let _handlingExpiry = false;
+
+  async function tryRefreshToken() {
+    const rt = adminSession?.refreshToken || adminSession?.refresh_token;
+    if (!rt) return false;
+    try {
+      const res = await fetch(`${INSFORGE_URL}/api/auth/sessions`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: rt })
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      if (data.accessToken || data.access_token) {
+        adminSession.accessToken  = data.accessToken  || data.access_token;
+        adminSession.refreshToken = data.refreshToken || data.refresh_token || rt;
+        return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  async function handleExpiredSession() {
+    if (_handlingExpiry) return;
+    _handlingExpiry = true;
+
+    // Intentar renovar el token antes de cerrar sesión
+    const refreshed = await tryRefreshToken();
+    if (refreshed) {
+      _handlingExpiry = false;
+      return; // Token renovado — el próximo poll usará el nuevo token
+    }
+
+    // Refresh falló → cerrar sesión y mostrar mensaje
+    stopPolling();
+    teardownRealtime();
+    adminSession     = null;
+    allLoans         = [];
+    allProfiles      = [];
+    allAuthUsers     = [];
+    allDeletedHistory= [];
+    realtimeRetryCount  = 0;
+    authUsersAvailable  = null;
+
+    document.getElementById('mainApp').classList.add('hidden');
+    document.getElementById('loginScreen').classList.remove('hidden');
+    document.getElementById('adminEmail').value    = '';
+    document.getElementById('adminPassword').value = '';
+    const ind = document.getElementById('realtimeIndicator');
+    if (ind) ind.style.display = 'none';
+
+    const errDiv = document.getElementById('loginError');
+    errDiv.textContent   = '⚠️ Tu sesión expiró. Por favor ingresa nuevamente.';
+    errDiv.style.display = 'block';
+
+    _handlingExpiry = false;
+  }
+
+  // Verifica si la respuesta es 401 y activa el manejo de expiración
+  // Retorna true si fue 401 (el llamador debe abortar la carga)
+  async function checkExpiry(res) {
+    if (res.status === 401) {
+      handleExpiredSession(); // no await: se ejecuta en paralelo
+      return true;
+    }
+    return false;
+  }
+
+  // ============================================================
   // POLLING AUTOMÁTICO (fallback cada 30s)
   // ============================================================
   function startPolling() {
@@ -796,6 +867,7 @@
         `${INSFORGE_URL}/api/database/records/profiles?order=created_at.asc&limit=500`,
         { headers: { 'Authorization': `Bearer ${getAdminToken()}` } }
       );
+      if (await checkExpiry(res)) return;
       allProfiles = res.ok ? (await res.json()) : [];
     } catch { allProfiles = []; }
   }
@@ -806,6 +878,7 @@
         `${INSFORGE_URL}/api/database/records/prestamos?order=created_at.desc&limit=2000`,
         { headers: { 'Authorization': `Bearer ${getAdminToken()}` } }
       );
+      if (await checkExpiry(res)) return;
       allLoans = res.ok ? (await res.json()) : [];
     } catch { allLoans = []; }
   }
@@ -1441,6 +1514,7 @@
         `${INSFORGE_URL}/api/database/records/historial_eliminados?order=created_at.desc&limit=500`,
         { headers: { 'Authorization': `Bearer ${getAdminToken()}` } }
       );
+      if (await checkExpiry(res)) return;
       allDeletedHistory = res.ok ? (await res.json()) : [];
     } catch { allDeletedHistory = []; }
   }
