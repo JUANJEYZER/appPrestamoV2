@@ -382,10 +382,11 @@
                 <th>Tipo de pago</th>
                 <th>Notas del pago</th>
                 <th>Fecha del pago</th>
+                <th></th>
               </tr>
             </thead>
             <tbody id="deletedBody">
-              <tr><td colspan="7" class="text-center text-gray-400 py-8">Cargando...</td></tr>
+              <tr><td colspan="8" class="text-center text-gray-400 py-8">Cargando...</td></tr>
             </tbody>
           </table>
         </div>
@@ -1509,6 +1510,21 @@
   // ============================================================
   // HISTORIAL DE ELIMINADOS
   // ============================================================
+  async function deleteHistorialRecord(id) {
+    if (!confirm('¿Eliminar este registro del historial? Esta acción no se puede deshacer.')) return;
+    try {
+      const res = await fetch(`${INSFORGE_URL}/api/database/records/historial_eliminados?id=eq.${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${getAdminToken()}` }
+      });
+      if (await checkExpiry(res)) return;
+      if (!res.ok) { showAdminToast('Error al eliminar el registro.', true); return; }
+      allDeletedHistory = allDeletedHistory.filter(r => r.id !== id);
+      renderDeletedHistory();
+      showAdminToast('Registro eliminado del historial.');
+    } catch { showAdminToast('Error de conexión al eliminar.', true); }
+  }
+
   async function loadDeletedHistory() {
     try {
       const res = await fetch(
@@ -1549,7 +1565,7 @@
 
     const tbody = document.getElementById('deletedBody');
     if (filtered.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="7" class="text-center text-gray-400 py-10">
+      tbody.innerHTML = `<tr><td colspan="8" class="text-center text-gray-400 py-10">
         <span class="material-symbols-outlined" style="font-size:32px;display:block;margin-bottom:8px;">delete_sweep</span>
         Sin registros eliminados en este período
       </td></tr>`;
@@ -1589,6 +1605,16 @@
           })
         : '—';
 
+      const deleteBtn = r.id
+        ? `<button onclick="deleteHistorialRecord(${r.id})"
+                  title="Eliminar este registro"
+                  style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#f87171;border-radius:8px;padding:4px 8px;cursor:pointer;transition:background .15s;"
+                  onmouseover="this.style.background='rgba(239,68,68,0.25)'"
+                  onmouseout="this.style.background='rgba(239,68,68,0.1)'">
+             <span class="material-symbols-outlined" style="font-size:16px;vertical-align:-3px;">delete</span>
+           </button>`
+        : '';
+
       return `
         <tr>
           <td class="text-xs font-medium" style="color:#f87171;">${fechaElim}</td>
@@ -1600,6 +1626,7 @@
           </td>
           <td class="text-gray-500 italic text-xs">${notas}</td>
           <td class="text-gray-500 text-xs">${fechaPago}</td>
+          <td style="text-align:center;">${deleteBtn}</td>
         </tr>`;
     }).join('');
 
