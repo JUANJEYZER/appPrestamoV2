@@ -511,6 +511,15 @@
   const INSFORGE_URL     = 'https://iyun2qn6.us-east.insforge.app';
   const INSFORGE_API_KEY = 'ik_f4f1e96f03e3a4455e48251c332f9a41';
 
+  // Fecha LOCAL en formato YYYY-MM-DD (evita desfase por zona horaria de UTC)
+  function localDate(d) {
+    const dt = d ? new Date(d) : new Date();
+    const y  = dt.getFullYear();
+    const m  = String(dt.getMonth() + 1).padStart(2, '0');
+    const day= String(dt.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
   // ============================================================
   // ESTADO GLOBAL
   // ============================================================
@@ -763,8 +772,8 @@
     document.getElementById('adminEmail').addEventListener('keypress', e => {
       if (e.key === 'Enter') document.getElementById('adminPassword').focus();
     });
-    // Filtros de pagos: por defecto hoy
-    const today = new Date().toISOString().split('T')[0];
+    // Filtros de pagos: por defecto hoy (fecha local)
+    const today = localDate();
     document.getElementById('filterPagosDesde').value = today;
     document.getElementById('filterPagosHasta').value = today;
   });
@@ -1259,7 +1268,7 @@
   // ACTIVIDAD — filtros por prestamista, fechas, totales
   // ============================================================
   function resetPaymentFilters() {
-    const today = new Date().toISOString().split('T')[0];
+    const today = localDate();
     document.getElementById('filterPagosPrestamista').value = '';
     document.getElementById('filterPagosDesde').value = today;
     document.getElementById('filterPagosHasta').value = today;
@@ -1287,7 +1296,7 @@
       if (pFilter && l.prestamista_id !== pFilter) return;
       (l.pagos || []).forEach(p => {
         const ts      = p.timestamp || p.date || 0;
-        const payDate = ts ? new Date(ts).toISOString().split('T')[0] : null;
+        const payDate = ts ? localDate(ts) : null;
         if (dDesde && payDate && payDate < dDesde) return;
         if (dHasta && payDate && payDate > dHasta) return;
         allPayments.push({
@@ -1312,7 +1321,7 @@
     document.getElementById('totalSinPago').textContent = sinPago.length;
 
     // Label del rango de fechas
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = localDate();
     const rangeLabel = (!dDesde && !dHasta)
       ? 'Sin filtro de fecha'
       : dDesde === dHasta && dDesde === todayStr
