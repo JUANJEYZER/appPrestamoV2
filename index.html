@@ -1519,7 +1519,7 @@
       });
       if (await checkExpiry(res)) return;
       if (!res.ok) { showAdminToast('Error al eliminar el registro.', true); return; }
-      allDeletedHistory = allDeletedHistory.filter(r => r.id !== id);
+      allDeletedHistory = allDeletedHistory.filter(r => String(r.id) !== String(id));
       renderDeletedHistory();
       showAdminToast('Registro eliminado del historial.');
     } catch { showAdminToast('Error de conexión al eliminar.', true); }
@@ -1606,7 +1606,7 @@
         : '—';
 
       const deleteBtn = r.id
-        ? `<button onclick="deleteHistorialRecord(${r.id})"
+        ? `<button onclick="deleteHistorialRecord('${r.id}')"
                   title="Eliminar este registro"
                   style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#f87171;border-radius:8px;padding:4px 8px;cursor:pointer;transition:background .15s;"
                   onmouseover="this.style.background='rgba(239,68,68,0.25)'"
