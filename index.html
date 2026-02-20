@@ -1869,9 +1869,15 @@
     if (!loan) { showAdminToast('Préstamo no encontrado.', true); return; }
 
     const pagos = Array.isArray(loan.pagos) ? loan.pagos : [];
-    if (paymentIdx < 0 || paymentIdx >= pagos.length) { showAdminToast('Pago no encontrado.', true); return; }
 
-    const newPagos = pagos.filter((_, i) => i !== paymentIdx);
+    // El modal muestra los pagos ordenados por fecha desc (igual que openLoanDetail).
+    // Usamos el mismo orden para que el índice coincida con lo que ve el usuario.
+    const sortedPagos = [...pagos].sort((a, b) => (b.timestamp || b.date || 0) - (a.timestamp || a.date || 0));
+    const paymentToRemove = sortedPagos[paymentIdx];
+    if (!paymentToRemove) { showAdminToast('Pago no encontrado.', true); return; }
+
+    // Eliminar por referencia del array original para no borrar el elemento equivocado
+    const newPagos = pagos.filter(p => p !== paymentToRemove);
 
     try {
       const res = await fetch(`${INSFORGE_URL}/api/database/records/prestamos?id=eq.${loanId}`, {
