@@ -231,7 +231,7 @@
     <div id="panel-loans" class="hidden">
 
       <!-- Tarjetas resumen (se actualizan al filtrar) -->
-      <div class="grid grid-cols-2 gap-4 mb-5">
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
         <div class="card p-4">
           <p class="text-xs text-gray-500 uppercase font-semibold tracking-wide">Capital Prestado</p>
           <p class="text-2xl font-bold text-blue-600 mt-1" id="summaryCapital">—</p>
@@ -241,6 +241,16 @@
           <p class="text-xs text-gray-500 uppercase font-semibold tracking-wide">Saldo Pendiente</p>
           <p class="text-2xl font-bold text-red-600 mt-1" id="summarySaldo">—</p>
           <p class="text-xs text-gray-400 mt-1">capital en calle</p>
+        </div>
+        <div class="card p-4">
+          <p class="text-xs text-gray-500 uppercase font-semibold tracking-wide">Capital Cobrado</p>
+          <p class="text-2xl font-bold text-green-400 mt-1" id="summaryCapCobrado">—</p>
+          <p class="text-xs text-gray-400 mt-1">abonos a capital</p>
+        </div>
+        <div class="card p-4">
+          <p class="text-xs text-gray-500 uppercase font-semibold tracking-wide">Intereses Cobrados</p>
+          <p class="text-2xl font-bold text-purple-400 mt-1" id="summaryIntCobrado">—</p>
+          <p class="text-xs text-gray-400 mt-1">de préstamos filtrados</p>
         </div>
       </div>
 
@@ -1299,8 +1309,23 @@
     // Actualizar tarjetas de resumen
     const totalCapital = filtered.reduce((s, l) => s + Number(l.monto_principal || 0), 0);
     const totalSaldo   = filtered.reduce((s, l) => s + Number(l.saldo_actual    || 0), 0);
-    document.getElementById('summaryCapital').textContent = '$' + totalCapital.toLocaleString();
-    document.getElementById('summarySaldo').textContent   = '$' + totalSaldo.toLocaleString();
+
+    // Sumar pagos reales de los préstamos filtrados
+    let totalCapCobrado = 0;
+    let totalIntCobrado = 0;
+    filtered.forEach(l => {
+      (l.pagos || []).forEach(p => {
+        const amt = Number(p.amount || 0);
+        if (amt <= 0 || p.type === 'refinanciamiento') return;
+        if (p.type === 'capital') totalCapCobrado += amt;
+        else totalIntCobrado += amt;
+      });
+    });
+
+    document.getElementById('summaryCapital').textContent    = '$' + totalCapital.toLocaleString();
+    document.getElementById('summarySaldo').textContent      = '$' + totalSaldo.toLocaleString();
+    document.getElementById('summaryCapCobrado').textContent = '$' + totalCapCobrado.toLocaleString();
+    document.getElementById('summaryIntCobrado').textContent = '$' + totalIntCobrado.toLocaleString();
     document.getElementById('summaryCapitalLabel').textContent =
       filtered.length === allLoans.length
         ? `${filtered.length} préstamos en total`
