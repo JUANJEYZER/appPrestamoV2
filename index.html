@@ -543,6 +543,7 @@
 
   // Realtime + Polling
   let pollingInterval      = null;
+  let tokenRefreshInterval = null;   // renueva el token proactivamente
   let realtimeSocket       = null;
   let realtimeRetryTimer   = null;
   let isRealtimeConnected  = false;
@@ -586,6 +587,7 @@
       }
 
       adminSession = await res.json();
+      adminSession._issuedAt = Date.now(); // marca de tiempo para calcular expiración
 
       const profileRes = await fetch(
         `${INSFORGE_URL}/api/database/records/profiles?user_id=eq.${adminSession.user.id}`,
@@ -606,7 +608,8 @@
 
       await loadAllData();
 
-      // Iniciar polling + realtime
+      // Iniciar renovación proactiva de token + polling + realtime
+      startTokenRefresh();
       startPolling();
       setupRealtime();
 
@@ -624,6 +627,7 @@
   }
 
   function adminLogout() {
+    stopTokenRefresh();
     stopPolling();
     teardownRealtime();
     adminSession = null;
@@ -659,6 +663,7 @@
       if (data.accessToken || data.access_token) {
         adminSession.accessToken  = data.accessToken  || data.access_token;
         adminSession.refreshToken = data.refreshToken || data.refresh_token || rt;
+        adminSession._issuedAt    = Date.now(); // reiniciar contador de expiración
         return true;
       }
     } catch (_) {}
@@ -677,6 +682,7 @@
     }
 
     // Refresh falló → cerrar sesión y mostrar mensaje
+    stopTokenRefresh();
     stopPolling();
     teardownRealtime();
     adminSession     = null;
@@ -712,12 +718,45 @@
   }
 
   // ============================================================
+  // RENOVACIÓN PROACTIVA DE TOKEN (cada 45 min)
+  // ============================================================
+  function startTokenRefresh() {
+    stopTokenRefresh();
+    // Calcular cuánto tiempo falta para la expiración y renovar 10 min antes
+    const expiresIn = adminSession?.expiresIn || adminSession?.expires_in || 3600; // segundos
+    const refreshIn = Math.max((expiresIn - 600), 2700) * 1000; // mín 45 min, máx expiresIn-10min
+    tokenRefreshInterval = setInterval(async () => {
+      if (!adminSession) return;
+      const ok = await tryRefreshToken();
+      if (!ok) {
+        // Si el refresh falla, intentar una vez más antes de cerrar sesión
+        await new Promise(r => setTimeout(r, 5000));
+        const retry = await tryRefreshToken();
+        if (!retry) handleExpiredSession();
+      }
+    }, refreshIn);
+  }
+
+  function stopTokenRefresh() {
+    if (tokenRefreshInterval) { clearInterval(tokenRefreshInterval); tokenRefreshInterval = null; }
+  }
+
+  // ============================================================
   // POLLING AUTOMÁTICO (fallback cada 30s)
   // ============================================================
   function startPolling() {
     stopPolling();
     pollingInterval = setInterval(async () => {
-      if (adminSession) await loadAllData();
+      if (!adminSession) return;
+      // Chequear si el token está por vencer (menos de 5 minutos) y renovarlo
+      const expiresIn  = adminSession?.expiresIn || adminSession?.expires_in || 3600;
+      const issuedAt   = adminSession._issuedAt || Date.now();
+      const elapsed    = (Date.now() - issuedAt) / 1000;
+      const remaining  = expiresIn - elapsed;
+      if (remaining < 300) {  // menos de 5 minutos restantes
+        await tryRefreshToken();
+      }
+      await loadAllData();
     }, 30000);
   }
 
