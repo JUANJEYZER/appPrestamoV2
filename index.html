@@ -486,8 +486,20 @@
         <input type="tel" id="editUserPhone" class="login-input" placeholder="+57 300 000 0000" />
       </div>
       <div>
-        <label class="text-sm font-medium text-gray-700">Nueva contraseña (dejar vacío para no cambiar)</label>
-        <input type="text" id="editUserPassword" class="login-input" placeholder="Nueva contraseña" autocomplete="off" />
+        <label class="text-sm font-medium text-gray-700">Contraseña guardada (referencia)</label>
+        <input type="text" id="editUserPassword" class="login-input" placeholder="Contraseña actual" autocomplete="off" />
+        <div style="background:rgba(234,179,8,0.12);border:1px solid rgba(234,179,8,0.4);border-radius:10px;padding:10px 14px;margin-top:8px;">
+          <p class="text-xs" style="color:#fbbf24;line-height:1.5;">
+            ⚠️ <strong>Este campo es solo de referencia visual.</strong> Para cambiar la contraseña real que usa el usuario para iniciar sesión, usa el botón de abajo.
+          </p>
+        </div>
+        <button onclick="sendPasswordReset()" id="sendResetBtn"
+                style="margin-top:10px;width:100%;padding:11px;border-radius:10px;border:1px solid rgba(96,165,250,0.5);background:rgba(59,130,246,0.12);color:#60a5fa;font-size:14px;font-weight:600;cursor:pointer;transition:background .2s;"
+                onmouseover="this.style.background='rgba(59,130,246,0.22)'"
+                onmouseout="this.style.background='rgba(59,130,246,0.12)'">
+          <span style="vertical-align:-3px;font-size:16px;" class="material-symbols-outlined">lock_reset</span>
+          Enviar correo de restablecimiento de contraseña
+        </button>
       </div>
       <!-- Toggle activo/inactivo -->
       <div class="flex items-center justify-between py-3 border-t border-gray-100">
@@ -1151,6 +1163,38 @@
     editingUserId = null;
   }
 
+  async function sendPasswordReset() {
+    if (!editingUserId) return;
+    const profile  = allProfiles.find(p => p.user_id === editingUserId);
+    const authMap  = Object.fromEntries(allAuthUsers.map(u => [u.id, u]));
+    const authUser = authMap[editingUserId] || {};
+    const email    = authUser.email || profile?.email;
+
+    if (!email) {
+      showAdminToast('No se encontró el correo del usuario.', true);
+      return;
+    }
+
+    const btn = document.getElementById('sendResetBtn');
+    btn.disabled = true;
+    btn.textContent = 'Enviando...';
+
+    try {
+      const res = await fetch(`${INSFORGE_URL}/api/auth/email/send-reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      // InsForge siempre devuelve 200 por seguridad (aunque el email no exista)
+      showAdminToast(`Correo de restablecimiento enviado a ${email}`);
+    } catch {
+      showAdminToast('Error al enviar el correo de restablecimiento.', true);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<span style="vertical-align:-3px;font-size:16px;" class="material-symbols-outlined">lock_reset</span> Enviar correo de restablecimiento de contraseña';
+    }
+  }
+
   async function saveEditUser() {
     if (!editingUserId) return;
     const nombre    = document.getElementById('editUserName').value.trim();
@@ -1171,6 +1215,7 @@
     errDiv.style.display = 'none';
 
     try {
+      // 1. Actualizar perfil en DB (nombre, teléfono, activo, contraseña visible)
       const updateData = { nombre, telefono: telefono || null, activo };
       if (contrasena) updateData.contrasena_texto = contrasena;
 
@@ -1191,7 +1236,11 @@
         throw new Error(e.message || e.error || 'Error al guardar los cambios');
       }
 
-      // Actualizar estado local
+      // Nota: InsForge no expone un endpoint admin para forzar cambio de contraseña.
+      // La contraseña se guarda en contrasena_texto solo como registro del admin.
+      // El cambio real en Auth se hace desde el panel de InsForge o enviando reset email.
+
+      // 3. Actualizar estado local
       const profile = allProfiles.find(p => p.user_id === editingUserId);
       if (profile) {
         profile.nombre   = nombre;
@@ -1201,6 +1250,7 @@
       }
 
       closeEditUserModal();
+      showAdminToast(contrasena ? 'Usuario y contraseña actualizados.' : 'Usuario actualizado.');
       renderUsers();
       renderDashboard();
 
